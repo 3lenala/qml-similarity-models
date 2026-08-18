@@ -4,12 +4,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
+from sklearn.datasets import make_blobs
+
 jax.config.update('jax_enable_x64', True)
+#enables 64 bit float numbers
 
 SEED = 42
 SAMPLES = 250
 
 class DataBase:
+    """Stores a database consisting of single input feature vectors and their respective labels.
+    Includes operations that you can apply to it: 
+                - Separate data into train/val/test
+                - Create all possible pairs"""
     def __init__(self, X, y):
         self.features = jnp.array(X, dtype=jnp.float64)
         self.labels = jnp.array(y, dtype=jnp.float64)
@@ -34,6 +41,7 @@ class DataBase:
     
 
 class SplittedDb:
+    """Stores a dataset splitted into train/val/test"""
     def __init__(self, database):
         sets = database.split_raw_data()
         self.train = sets['train']
@@ -42,6 +50,9 @@ class SplittedDb:
 
 
 class PairsSet:
+    """Stores a dataset that consists of the pairs of
+    an original dataset X,y. The pairs are already splitted
+    into test/val/test"""
     def __init__(self, X, y):
         self.original = DataBase(X, y)
         self.split = SplittedDb(self.original)
@@ -53,8 +64,12 @@ class PairsSet:
 
 
 def sinus_dataset_generator(samples: int, a: float = 0.8, seed: int = SEED):
+    """Code taken from Pablo Rodriguez-Grasa, Yue Ban, and Mikel Sanz
+      Neural quantum kernels: Training quantum kernels with quantum 
+      neural networks(2025)
+       Generates a dataset of two possible classes divided by the decision 
+        frontier: x1=-a·sin(π x0) for 'a' a configurable parameter"""
     rng = np.random.default_rng(seed)
-
     n_per_class = samples // 2
     X, y = [], []
     count = [0, 0]
@@ -68,56 +83,11 @@ def sinus_dataset_generator(samples: int, a: float = 0.8, seed: int = SEED):
             count[label] += 1
 
     X = np.array(X)
-    # y = 2 * np.array(y) - 1
     y = np.array(y)
     perm = rng.permutation(len(y))
     return X[perm], y[perm]
 
-
-def plot_set(dataset: SplittedDb, sinus:bool=True):
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    colors = {
-        ('train', 0): '#39568CFF', ('train', 1): '#73D055FF',
-        ('val', 0):   '#2D708EFF', ('val', 1):   '#B8De29ff',
-        ('test', 0):  '#238A8DFF', ('test', 1):  '#FDE725FF',
-    }
-
-    splits = [
-        ('train', dataset.train.features, dataset.train.labels, 'o', 0.9),
-        ('val',   dataset.val.features, dataset.val.labels,   '^', 0.9),
-        ('test',  dataset.test.features, dataset.test.labels,  's', 0.9),
-    ]
-
-    for split_name, X, y, marker, alpha in splits:
-        for cls in [0, 1]:
-            mask = y == cls
-            ax.scatter(
-                X[mask, 0], X[mask, 1],
-                c=colors[(split_name, cls)],
-                marker=marker, alpha=alpha,
-                s=70 if split_name != 'train' else 50,
-                edgecolors='black',
-                linewidths=0.6,
-                label=f'{split_name} - class {cls}'
-            )
-
-    ax.set_xlabel('x₀')
-    ax.set_ylabel('x₁')
-    if sinus:
-        x_range = np.linspace(-1.0, 1.0, 300)
-        ax.plot(x_range, -0.8 * np.sin(np.pi * x_range), color='black', linestyle='--',
-        linewidth=1.5, label=f'Decision frontier: y=-{0.8}·sin(πx)', zorder=5)
-    ax.set_xlim(-1.05, 1.05)
-    ax.set_ylim(-1.05, 1.05)
-    ax.legend(loc='best', fontsize=8, ncol=2)
-    plt.tight_layout()
-    plt.savefig('split_visualization.png', dpi=150)
-    plt.close()
-
-
 X, y = sinus_dataset_generator(samples=SAMPLES, seed=SEED)
 database = DataBase(X,y)
-sinus = SplittedDb(database)
-sinus_pairs = PairsSet(X, y)
+original_dataset = SplittedDb(database)
+dataset = PairsSet(X, y)

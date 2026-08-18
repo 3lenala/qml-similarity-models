@@ -70,8 +70,6 @@ class TrainedModel:
         self.avg_epochs = np.average(over_seeds.epochs)
         self.std_epochs = np.std(over_seeds.epochs) 
 
-        self.acc_over_seeds = over_seeds.accuracy
-        self.auc_over_seeds = over_seeds.auc
         
 class TrainFunctions(NamedTuple):
     loss : Callable
@@ -101,7 +99,6 @@ def compile_train_functions(similarity_measurement: Callable, learning_rate: flo
         return params, opt_state, loss_val
     
     return TrainFunctions(loss=loss, optimizer=optimizer, step=step)
-        
 
 
 def compile_predict(similarity_measurement):
@@ -115,8 +112,7 @@ def compile_predict(similarity_measurement):
     return predict
 
 
-
-def train_model(model, hyperparameters_model, layers, dataset, seeds, evaluate=False) -> TrainedModel:
+def train_model(model, layers, dataset, seeds, evaluate=False) -> TrainedModel:
     """Runs the training process over a dataset for a model with layers data reuploading layers and some hyperparameters.
        In order to find the best set of parameters for the model, the training process is repeated a number SEEDS of times 
        each with a different initial value for the parameters theta of the model. Finally, the set of parameters that give a lower value
@@ -130,7 +126,7 @@ def train_model(model, hyperparameters_model, layers, dataset, seeds, evaluate=F
     
     # loss, predict and step are declared here instead of in the train loop
     # to avoid the compilation process to run once per seed.
-    train_functions = compile_train_functions(similarity_measurement, hyperparameters_model.learning_rate)
+    train_functions = compile_train_functions(similarity_measurement, model.hyperparameters.learning_rate)
     
     if evaluate:
         predict = compile_predict(similarity_measurement)
@@ -139,7 +135,7 @@ def train_model(model, hyperparameters_model, layers, dataset, seeds, evaluate=F
     for seed in range(seeds):
         key = jax.random.PRNGKey(seed)
         theta0 = jax.random.normal(key, shape)*SCALING_FACTOR
-        training_result = train(train_functions, theta0, hyperparameters_model, dataset, key)
+        training_result = train(train_functions, theta0, model.hyperparameters, dataset, key)
             
         if training_result.best_val_loss < best_loss:
             if evaluate:

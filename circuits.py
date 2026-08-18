@@ -8,7 +8,7 @@ LAYERS_LIST = [i+1 for i in range(10)]
 N_QUBITS = 2
 
 
-@dataclass # included so that the base values are modifyable
+@dataclass # included so that the base values are modifiable
 class HyperparametersModel:
     """Hyperparameters selection for training:
                     - max epochs: maximum number of training epochs
@@ -18,13 +18,15 @@ class HyperparametersModel:
                     - learning rate: learning rate for the ADAM optimizer"""
 
     def __init__(
-        self, max_epochs, patience, tolerance, batch_size, learning_rate
+        self, max_epochs=500, patience=10, tolerance=1e-4, batch_size=32, learning_rate=0.01
     ):
         self.max_epochs = max_epochs
         self.patience = patience
         self.tolerance = tolerance
         self.batch_size = batch_size
         self.learning_rate = learning_rate
+
+# ENUMERATION OF ALL POSSIBLE CONFIGURATIONS AND ARCHITECTURES:
 
 class Architecture(Enum):
     OVERLAP = auto()
@@ -48,6 +50,7 @@ class EncodingForm(Enum):
     ZZ = auto()
 
 
+
 class Encoding:
     def __init__(self, form: EncodingForm):
         self.form = form
@@ -65,7 +68,7 @@ class Encoding:
         elif self.form is EncodingForm.ZZ:
             def zz_feature(rescale=True):
                 """ZZ feature map (Havlicek et al., 2019),
-                  by default the inputs are reescaled to [0,pi]"""
+                  by default the inputs are rescaled to [0,pi]"""
                 x_scaled = (x + 1) * (np.pi / 2.0) if rescale else x
                 nload = min(len(x_scaled), n_qubits)
 
@@ -172,13 +175,17 @@ class Configuration:
 class SQNNModel:
     """Stores all the information required to build an overlap and a similarity 
     function architecture for a similarity problem"""
-    def __init__(self, architecture: Architecture, configuration: Configuration):
+    def __init__(self, architecture: Architecture, configuration: Configuration, hyperparameters: HyperparametersModel):
         self.architecture = architecture
         self.configuration = configuration
         self.dev = qml.device('default.qubit', wires=self.configuration.qubits)
+        
         # to keep track of training results for different
-        self.result = {L: [] for L in LAYERS_LIST}
         # number of data reuploading layers applied.
+        self.result = {L: [] for L in LAYERS_LIST}
+        
+        self.hyperparameters = hyperparameters
+        
 
     def create_qnn(self):
         """Build the standard quantum neural network as a callable function"""
@@ -228,7 +235,7 @@ class SQNNModel:
                     # the outputs are
                 return similarity_function(x1, x2, theta)
             else:
-                raise ValueError(f'Unkown architecture {self.architecture}')
+                raise ValueError(f'Unknown architecture {self.architecture}')
         return similarity_measurement  # returns a function that
         # evaluates exp(-(QNN(x1)-QNN(x2))**2
 
@@ -236,12 +243,15 @@ class SQNNModel:
 class QNNModel:
     """Stores all the information required to build a standard quantum neural network
     for a classification problem"""
-    def __init__(self, configuration: Configuration):
+    def __init__(self, configuration: Configuration, hyperparameters: HyperparametersModel):
         self.configuration = configuration
         self.dev = qml.device('default.qubit', wires=self.configuration.qubits)
         # to keep track of training results for different
-        self.result = {L: [] for L in LAYERS_LIST}
         # number of data reuploading layers applied.
+        self.result = {L: [] for L in LAYERS_LIST}
+        
+        self.hyperparameters = hyperparameters
+
 
     def create_qnn(self):
         """Build the standard quantum neural network as a callable function"""
@@ -310,3 +320,9 @@ configurations = {
                                 n_rotations=2)),
 }
 
+
+models_sim = {i : SQNNModel(architecture=Architecture.SIMILARITY_FUNCTION, configuration=configurations[i], 
+                            hyperparameters=HyperparametersModel()) for i in configurations}
+
+models_overlap = {i : SQNNModel(architecture=Architecture.OVERLAP, configuration=configurations[i], 
+                            hyperparameters=HyperparametersModel()) for i in configurations}
