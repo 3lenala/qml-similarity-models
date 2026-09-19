@@ -1,5 +1,8 @@
 from train import *
 from dataclasses import replace
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import matplotlib
 
 BATCH_SIZES = [2**i for i in range(int(np.log2(dataset.len_train))+1)]
 BATCH_SIZES.append(dataset.len_train) # to consider batch gradient descent too
@@ -40,12 +43,13 @@ def run_layers(models: SQNNModel | QNNModel, dataset: PairsSet | SplittedDb):
         for layers in LAYERS_LIST:
             result = train_model(evaluate=True, model=model, layers=layers, dataset=dataset, seeds=SEEDS_EVALUATE)
             (model.result)[layers] = result
+            loss_v_epochs(training_result=result.best, layers=layers, model_name=i)
             print(f'L={layers}:  val loss {result.best.best_val_loss:.4f} |  train loss {result.best.final_train_loss:.4f} | '
                   f'avg loss {np.average(result.val_over_seeds):.4f}  +- {np.std(result.val_over_seeds):.4f} '
                   f' | accuracy = {result.best.accuracy:.3f} | auc {result.best.auc:.3f} | epochs {result.best.epochs}' )
     return models
 
-def hyperparameter_sweep(models: SQNNModel | QNNModel, variable: str, values: list[int|float], dataset: PairsSet | SplittedDb, layers: int = LAYERS):
+def hyperparameter_sweep(models: SQNNModel | QNNModel, variable: str, values: list[int|float], dataset: PairsSet | SplittedDb, layers: int = LAYERS, loss_epochs: bool = False):
     sweep = HyperparametersSweep(values)
     for i in models:
         print(f'model {i}')
@@ -53,11 +57,14 @@ def hyperparameter_sweep(models: SQNNModel | QNNModel, variable: str, values: li
         for value in values:
             model.hyperparameters = replace(model.hyperparameters, **{variable: value})
             training_result = train_model(model=model, layers=layers, dataset=dataset, seeds=SEEDS_HYPER)
-            sweep.append(training_result, value)
+            if loss_epochs:
+                loss_v_epochs(training_result=training_result.best, layers=layers, model_name='')
+            sweep.append_result(training_result, value)
             print(f'{variable} = {value}:  loss {training_result.best.best_val_loss:.4f} | time {training_result.best.time:.3f}'
                   f' | avg loss {training_result.avg_val_over_seeds:4f}+-{training_result.std_val_over_seeds:4f}  | avg time {training_result.avg_time:.3f}'
                   f'+-{training_result.std_time:.3f} | avg epochs {training_result.avg_epochs:2f}+-{training_result.std_epochs}')
     return sweep
+
 
 # -------------------------------------------------------------------------------------------------------
 #-------------------------------------------   PLOTS   --------------------------------------------------
@@ -111,10 +118,10 @@ def hyperparameters_sweep_plot(architecture, sweep, values, xlabel, base, exp1):
     plt.show()
     plt.close(fig4)
     
-def loss_v_epochs(training_result, layers: int, model_name: str):
+def loss_v_epochs(training_result: TrainingResult, layers: int, model_name: str):
     plt.rcParams.update({'font.size': 28})
     
-    viridis = cm.get_cmap('viridis')
+    viridis = matplotlib.colormaps['viridis']
     color_train = viridis(0.2) 
     color_val = viridis(0.8)
     

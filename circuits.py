@@ -50,7 +50,6 @@ class EncodingForm(Enum):
     ZZ = auto()
 
 
-
 class Encoding:
     def __init__(self, form: EncodingForm):
         self.form = form
@@ -130,7 +129,7 @@ class Variational:
                 for rotation in range(self.rotations):
                     for i in range(n_qubits):
                         if rotation % 2 == 0:
-                            qml.RY(theta[layers, i, rotation], wires=i)
+                            qml.RX(theta[layers, i, rotation], wires=i)
                         else:
                             qml.RZ(theta[layers, i, rotation], wires=i)
                 entanglement_circuit()
@@ -143,7 +142,7 @@ class Variational:
                 Theta should be of size [layers, n_qubits, n_rotations]"""
                 for rotation in range(self.rotations):
                     for i in range(n_qubits):
-                        qml.RY(theta[layers, i, rotation], wires=i)
+                        qml.RZ(theta[layers, i, rotation], wires=i)
                     entanglement_circuit()
             return TwoLocal
 
@@ -153,9 +152,9 @@ class Variational:
                 if n_qubits != 2:
                     raise ValueError(f'Tree Tensor only available for 2 qubits')
                 for i in range(n_qubits):
-                    qml.RY(theta[layers, i, 0], wires=i)
+                    qml.RZ(theta[layers, i, 0], wires=i)
                 qml.CNOT(wires=[1, 0])  # control=1, target=0
-                qml.RY(theta[layers, 0, 1], wires=0)
+                qml.RZ(theta[layers, 0, 1], wires=0)
             return TreeTensor
         else:
             raise ValueError(f'Unknown variational form {self.form}')
@@ -239,6 +238,14 @@ class SQNNModel:
         return similarity_measurement  # returns a function that
         # evaluates exp(-(QNN(x1)-QNN(x2))**2
 
+    def single_branch(self, X, layers, theta):
+        @qml.qnode(self.dev, interface='jax')
+        def single_branch_state(x):
+            qnn = self.create_qnn()
+            qnn(x=x, theta=theta, layers=layers)
+            return qml.state()
+        return jax.vmap(single_branch_state, in_axes=(0))(X)
+        
 
 class QNNModel:
     """Stores all the information required to build a standard quantum neural network
@@ -311,13 +318,6 @@ configurations = {
         variational=Variational(entanglement=EntanglementForm.NONE,
                                 form=VariationalForm.TREETENSOR, 
                                 n_rotations=2)),
-
-    'zz-treetensor': Configuration(
-        n_qubits=N_QUBITS,
-        encoding=Encoding(EncodingForm.ZZ),
-        variational=Variational(entanglement=EntanglementForm.NONE,
-                                form=VariationalForm.TREETENSOR, 
-                                n_rotations=2)),
 }
 
 
@@ -326,3 +326,29 @@ models_sim = {i : SQNNModel(architecture=Architecture.SIMILARITY_FUNCTION, confi
 
 models_overlap = {i : SQNNModel(architecture=Architecture.OVERLAP, configuration=configurations[i], 
                             hyperparameters=HyperparametersModel()) for i in configurations}
+
+configurations_2n = {
+    'angle-twolocal-1': Configuration(
+        n_qubits=4,
+        encoding=Encoding(EncodingForm.ANGLE),
+        variational=Variational(entanglement=EntanglementForm.CIRCULAR,
+                                form=VariationalForm.TWOLOCAL, 
+                                n_rotations=1)),
+
+    'angle-twolocal-2': Configuration(
+        n_qubits=4,
+        encoding=Encoding(EncodingForm.ANGLE),
+        variational=Variational(entanglement=EntanglementForm.CIRCULAR,
+                                form=VariationalForm.TWOLOCAL, 
+                                n_rotations=2)),
+
+    #(n_rotations/entanglement does not apply to TreeTensor)
+    'angle-treetensor': Configuration(
+        n_qubits=4,
+        encoding=Encoding(EncodingForm.ANGLE),
+        variational=Variational(entanglement=EntanglementForm.NONE,
+                                form=VariationalForm.TREETENSOR, 
+                                n_rotations=2)),
+}
+
+models_2n = {i : QNNModel(configuration=configurations[i], hyperparameters=HyperparametersModel()) for i in configurations}

@@ -9,15 +9,12 @@ from sklearn.metrics import (
 import time
 import numpy as np
 import optax
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from matplotlib import cm
 from typing import Callable, NamedTuple
 
 # number of repetitions of each experiment over
 # different initial parameters each
-SEEDS_HYPER = 40
-SEEDS_EVALUATE = 10
+SEEDS_HYPER = 10
+SEEDS_EVALUATE = 100
 THRESHOLD = 0.5
 SCALING_FACTOR = 0.2 * jnp.pi
 
@@ -37,12 +34,14 @@ class TrainingResult:
         self.roc = None
         self.auc = None
         self.confusion = None
+        self.threshold = None
         
-    def append_eval(self, accuracy, roc, auc, confusion):
+    def append_eval(self, accuracy, roc, auc, confusion, threshold):
         self.accuracy = accuracy
         self.roc = roc
         self.auc = auc
         self.confusion = confusion
+        self.threshold = threshold
 
 
 class SeedStorage:
@@ -75,17 +74,58 @@ class TrainFunctions(NamedTuple):
     loss : Callable
     optimizer : optax.GradientTransformation
     step: Callable
-        
-        
-def compile_train_functions(similarity_measurement: Callable, learning_rate: float):
+    
+
+class LossType(Enum):
+    RBF = auto()
+    CONTRASTIVE = auto()
+    BCE = auto()
+    WEIGHTED_CONTRASTIVE = auto()
+    HYBRID_1 = auto()
+    HYBRID_2 = auto()
+    
+def compile_train_functions(similarity_measurement: Callable, learning_rate: float, loss_type: LossType, margin: float = 0.5):
     @jax.jit
     def loss(theta, X, y):
         """Defines the loss function as the mean squared error"""
         def single_loss(x, label):
             pred = similarity_measurement(x, theta)
-            return (pred - label) ** 2
+            
+            if loss_type is LossType.RBF:
+                return (pred - label) ** 2
+            
+            if loss_type is LossType.CONTRASTIVE or loss_type is LossType.WEIGHTED_CONTRASTIVE:
+                return (1-label) * jnp.maximum(0, pred-label-margin)**2 + label*jnp.maximum(0, label-pred)**2
+            
+            if loss_type is LossType.BCE:
+                eps = 1e-7 # to avoid log(0)
+                pred = jnp.clip(pred, eps, 1 - eps)
 
+                return -(
+                    label * jnp.log(pred)
+                    + (1 - label) * jnp.log(1 - pred)
+                )
+            
+            raise ValueError(f'{loss_type} not available')
+        
         losses = jax.vmap(single_loss, in_axes=(0, 0))(X, y)
+        
+        if loss_type is LossType.WEIGHTED_CONTRASTIVE:
+            
+                n_same = jnp.sum(y == 1)
+                n_different = jnp.sum(y == 0)
+
+                w_same = len(y) / (2 * n_same)
+                w_different = len(y) / (2 * n_different)
+
+                weights = jnp.where(
+                    y == 1,
+                    w_same,
+                    w_different
+                )
+
+                return jnp.sum(weights * losses) / jnp.sum(weights)
+
         return jnp.mean(losses)
     
     optimizer = optax.adam(learning_rate)
@@ -126,7 +166,7 @@ def train_model(model, layers, dataset, seeds, evaluate=False) -> TrainedModel:
     
     # loss, predict and step are declared here instead of in the train loop
     # to avoid the compilation process to run once per seed.
-    train_functions = compile_train_functions(similarity_measurement, model.hyperparameters.learning_rate)
+    train_functions = compile_train_functions(similarity_measurement, model.hyperparameters.learning_rate, loss_type=LossType.CONTRASTIVE)
     
     if evaluate:
         predict = compile_predict(similarity_measurement)
@@ -219,17 +259,27 @@ def train(train_functions, theta0, hyperparameters_model, dataset, key, shuffle=
     return TrainingResult(best_theta, best_val_loss, final_train_loss, val_losses, train_losses, epochs_used, total_time)
 
 
-def evaluate_test(training_result: TrainingResult, dataset: PairsSet, predict: Callable, threshold: float =THRESHOLD) -> TrainingResult:
+def evaluate_test(training_result: TrainingResult,  dataset: PairsSet, predict: Callable, threshold: float | None = None) -> TrainingResult:
+    if threshold == None:
+        validation_output = predict(dataset.threshold_val.features, training_result.theta)
+        roc = roc_curve(y_true=dataset.threshold_val.labels, y_score=validation_output)
+        fpr, tpr, thresholds = roc
 
+        youden_j = tpr - fpr
+        idx = np.argmax(youden_j)
+
+        threshold = thresholds[idx]
+
+ 
     output = predict(dataset.test.features, training_result.theta)
-    y_pred = (output > threshold).astype(jnp.int64)
-
-    accuracy = accuracy_score(y_true=dataset.test.labels, y_pred=y_pred)
     roc = roc_curve(y_true=dataset.test.labels, y_score=output)
+    y_pred = (output >= threshold).astype(jnp.int64)
+    accuracy = accuracy_score(y_true=dataset.test.labels, y_pred=y_pred)
+    
     auc_score = roc_auc_score(y_true=dataset.test.labels, y_score=output)
     confusion = confusion_matrix(y_true=dataset.test.labels, y_pred=y_pred)
     
-    training_result.append_eval(accuracy=accuracy, roc=roc, auc=auc_score, confusion=confusion)
+    training_result.append_eval(accuracy=accuracy, roc=roc, auc=auc_score, confusion=confusion, threshold=threshold)
     return training_result
 
 
