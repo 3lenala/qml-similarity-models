@@ -141,9 +141,9 @@ result = train_model(model, layers=5, dataset=dataset, seeds=10, evaluate=True)
 
 
 
-```bash test_*.py
+```bash 
 
-pytest
+pytest test_*.py
 
 ```
 
